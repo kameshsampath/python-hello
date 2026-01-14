@@ -1,0 +1,33 @@
+# yaml-language-server: $schema=https://taskfile.dev/schema.json
+
+version: "3"
+
+dotenv:
+  - .env
+
+vars:
+  IMAGE_NAME: kamesh-python-hello
+
+tasks:
+  default:
+    desc: Print a greeting message
+    cmds:
+      - echo "Hello,{{.NAME}}"
+  ecr:login:
+    desc: Login to ECR
+    cmds:
+      - aws ecr get-login-password --region {{.AWS_REGION}} | docker login --username AWS --password-stdin
+        {{.AWS_ACCOUNT_ID}}.dkr.ecr.{{.AWS_REGION}}.amazonaws.com
+    silent: true
+  build:
+    desc: Build the Docker image
+    cmds:
+      - docker build --platform linux/amd64 --platform linux/arm64 -t {{.IMAGE_NAME}} .
+      - docker tag {{.IMAGE_NAME}}:latest
+        {{.AWS_ACCOUNT_ID}}.dkr.ecr.{{.AWS_REGION}}.amazonaws.com/devrel-demos/{{.IMAGE_NAME}}
+    silent: true
+  ecr:push:
+    desc: Push the Docker image to ECR
+    cmds:
+      - docker push {{.AWS_ACCOUNT_ID}}.dkr.ecr.{{.AWS_REGION}}.amazonaws.com/devrel-demos/{{.IMAGE_NAME}}
+    silent: true
