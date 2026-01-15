@@ -6,28 +6,170 @@ dotenv:
   - .env
 
 vars:
-  IMAGE_NAME: kamesh-python-hello
+  IMAGE_NAME: kamesh-streamlit-penguins-app
 
 tasks:
   default:
-    desc: Print a greeting message
+    desc: Print environment variables to verify configuration
     cmds:
-      - echo "Hello,{{.NAME}}"
+      - |
+        echo "╔══════════════════════════════════════════════════════════╗"
+        echo "║           Environment Configuration Check                ║"
+        echo "╠══════════════════════════════════════════════════════════╣"
+        echo "║ AWS_REGION:                   $AWS_REGION"
+        echo "║ AWS_ACCOUNT_ID:               $AWS_ACCOUNT_ID"
+        echo "║ APPRUNNER_ECR_ROLE_NAME:      $APPRUNNER_ECR_ROLE_NAME"
+        echo "║ APPRUNNER_INSTANCE_ROLE_NAME: $APPRUNNER_INSTANCE_ROLE_NAME"
+        echo "║ IMAGE_NAME:                   {{.IMAGE_NAME}}"
+        echo "╠══════════════════════════════════════════════════════════╣"
+        echo "║ SNOWFLAKE_ACCOUNT:            $SNOWFLAKE_ACCOUNT"
+        echo "║ SNOWFLAKE_USER:               $SNOWFLAKE_USER"
+        echo "║ SNOWFLAKE_PASSWORD:           ${SNOWFLAKE_PASSWORD:+(set)}"
+        echo "║ SNOWFLAKE_WAREHOUSE:          $SNOWFLAKE_WAREHOUSE"
+        echo "║ SNOWFLAKE_ROLE:               $SNOWFLAKE_ROLE"
+        echo "║ DEMO_DATABASE:                $DEMO_DATABASE"
+        echo "║ SA_ROLE:                      $SA_ROLE"
+        echo "║ WID_SNOWFLAKE_USER:           $WID_SNOWFLAKE_USER"
+        echo "╚══════════════════════════════════════════════════════════╝"
   ecr:login:
     desc: Login to ECR
     cmds:
-      - aws ecr get-login-password --region {{.AWS_REGION}} | docker login --username AWS --password-stdin
-        {{.AWS_ACCOUNT_ID}}.dkr.ecr.{{.AWS_REGION}}.amazonaws.com
+      - aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin
+        $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
     silent: true
-  build:
-    desc: Build the Docker image
+  docker:build:
+    desc: Build the Docker image (local, single platform)
     cmds:
-      - docker build --platform linux/amd64 --platform linux/arm64 -t {{.IMAGE_NAME}} .
-      - docker tag {{.IMAGE_NAME}}:latest
-        {{.AWS_ACCOUNT_ID}}.dkr.ecr.{{.AWS_REGION}}.amazonaws.com/devrel-demos/{{.IMAGE_NAME}}
+      - docker build -t {{.IMAGE_NAME}} .
+      - echo "✅ Built Docker image {{.IMAGE_NAME}}"
     silent: true
+
   ecr:push:
-    desc: Push the Docker image to ECR
+    desc: Build and push multi-arch image to ECR
     cmds:
-      - docker push {{.AWS_ACCOUNT_ID}}.dkr.ecr.{{.AWS_REGION}}.amazonaws.com/devrel-demos/{{.IMAGE_NAME}}
+      - |
+        docker buildx build \
+          --platform linux/amd64,linux/arm64 \
+          --provenance=false \
+          -t $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/devrel-demos/{{.IMAGE_NAME}}:latest \
+          --push .
+      - echo "✅ Pushed multi-arch image to ECR"
+    silent: false
+
+  ecr:inspect:
+    desc: Inspect image manifest (platforms, size, digest)
+    cmds:
+      - |
+        echo "╔══════════════════════════════════════════════════════════╗"
+        echo "║              Image Manifest Details                      ║"
+        echo "╚══════════════════════════════════════════════════════════╝"
+      - docker buildx imagetools inspect
+        $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/devrel-demos/{{.IMAGE_NAME}}:latest
+    silent: false
+
+  iam:create-apprunner-role:
+    desc: Create IAM role for App Runner to access ECR
+    cmds:
+      - |
+        aws iam create-role \
+          --role-name $APPRUNNER_ECR_ROLE_NAME \
+          --assume-role-policy-document file://config/apprunner-ecr-trust-policy.json \
+          --description "IAM role for App Runner to access ECR"
+      - |
+        aws iam attach-role-policy \
+          --role-name $APPRUNNER_ECR_ROLE_NAME \
+          --policy-arn arn:aws:iam::aws:policy/service-role/AWSAppRunnerServicePolicyForECRAccess
+      - echo "✅ Created IAM role $APPRUNNER_ECR_ROLE_NAME with ECR access policy"
+    silent: false
+
+  iam:delete-apprunner-role:
+    desc: Delete IAM role for App Runner ECR access
+    cmds:
+      - |
+        aws iam detach-role-policy \
+          --role-name $APPRUNNER_ECR_ROLE_NAME \
+          --policy-arn arn:aws:iam::aws:policy/service-role/AWSAppRunnerServicePolicyForECRAccess
+      - aws iam delete-role --role-name $APPRUNNER_ECR_ROLE_NAME
+      - echo "🗑️  Deleted IAM role $APPRUNNER_ECR_ROLE_NAME"
+    silent: false
+
+  iam:get-apprunner-role-arn:
+    desc: Get the ARN of the App Runner ECR access role
+    cmds:
+      - aws iam get-role --role-name $APPRUNNER_ECR_ROLE_NAME --query 'Role.Arn' --output text
     silent: true
+
+  iam:create-instance-role:
+    desc: Create IAM instance role for App Runner (used for Snowflake WIDF)
+    cmds:
+      - |
+        aws iam create-role \
+          --role-name $APPRUNNER_INSTANCE_ROLE_NAME \
+          --assume-role-policy-document file://config/apprunner-instance-trust-policy.json \
+          --description "IAM instance role for App Runner workload identity federation with Snowflake"
+      - echo "✅ Created IAM instance role $APPRUNNER_INSTANCE_ROLE_NAME"
+    silent: false
+
+  iam:delete-instance-role:
+    desc: Delete IAM instance role for App Runner
+    cmds:
+      - aws iam delete-role --role-name $APPRUNNER_INSTANCE_ROLE_NAME
+      - echo "🗑️  Deleted IAM instance role $APPRUNNER_INSTANCE_ROLE_NAME"
+    silent: false
+
+  iam:get-instance-role-arn:
+    desc: Get the ARN of the App Runner instance role
+    cmds:
+      - aws iam get-role --role-name $APPRUNNER_INSTANCE_ROLE_NAME --query 'Role.Arn' --output text
+    silent: true
+
+  snow:setup:
+    desc: Run Snowflake setup SQL with environment variables
+    cmds:
+      - |
+        snow sql \
+          --enable-templating=ALL \
+          -f setup.sql \
+          -D "sa_role=$SA_ROLE" \
+          -D "db_name=$DEMO_DATABASE"
+      - echo "✅ Snowflake setup completed"
+
+  snow:wid:
+    desc: Configure Snowflake Workload Identity Federation for App Runner
+    cmds:
+      - |
+        snow sql \
+          --enable-templating=ALL \
+          -f wid.sql \
+          -D "aws_account_id=$AWS_ACCOUNT_ID" \
+          -D "instance_role_name=$APPRUNNER_INSTANCE_ROLE_NAME" \
+          -D "snowflake_user=$WID_SNOWFLAKE_USER" \
+          -D "sa_role=$SA_ROLE"
+      - echo "✅ Snowflake WIDF configuration completed"
+
+  snow:pat:
+    desc: Create or rotate a Snowflake Programmatic Access Token
+    deps:
+      - snow:setup
+    cmds:
+      - snow-utils pat:create
+      - echo "✅ PAT created/rotated successfully"
+
+  run:
+    desc: Run the Streamlit app locally
+    cmds:
+      - uv run streamlit run server.py
+
+  docker:run:
+    desc: Run Docker container locally with env variables
+    cmds:
+      - |
+        docker run -p 8080:8080 \
+          -e DEPLOYMENT_ENV=DOCKER \
+          -e SNOWFLAKE_ACCOUNT=$SNOWFLAKE_ACCOUNT \
+          -e SNOWFLAKE_USER=$SA_USER \
+          -e SNOWFLAKE_PASSWORD=$SNOWFLAKE_PASSWORD \
+          -e SNOWFLAKE_WAREHOUSE=$SNOWFLAKE_WAREHOUSE \
+          -e SNOWFLAKE_ROLE=$SA_ROLE \
+          -e DEMO_DATABASE=$DEMO_DATABASE \
+          {{.IMAGE_NAME}}

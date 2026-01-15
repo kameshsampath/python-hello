@@ -1,0 +1,28 @@
+# Secrets
+.streamlit/secrets.toml
+.env
+.env.*
+
+# Python
+__pycache__
+*.py[cod]
+.venv
+.pytest_cache
+
+
+# Git
+.git
+.gitignore
+
+# IDE
+.idea
+.vscode
+.cursor
+
+# Project files not needed in container
+data/
+*.md
+LICENSE
+Taskfile.yml
+setup.sql
+config/

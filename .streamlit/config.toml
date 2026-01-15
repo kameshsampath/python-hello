@@ -1,0 +1,14 @@
+[server]
+headless = true
+
+[theme]
+# Warm coral theme inspired by Antarctic sunsets
+base = "light"
+primaryColor = "#E07A5F"              # Coral/terracotta
+backgroundColor = "#FFFCF9"           # Warm white
+secondaryBackgroundColor = "#F4F1ED"  # Soft cream for cards
+textColor = "#2D3436"                 # Charcoal for readability
+font = "sans serif"
+
+[browser]
+gatherUsageStats = false
